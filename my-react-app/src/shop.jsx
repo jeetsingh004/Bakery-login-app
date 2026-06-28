@@ -138,7 +138,7 @@ export default function Shop() {
       {/* ---------- HEADER ---------- */}
       <header className="shop-header">
         <div className="shop-header-inner">
-          <span className="shop-logo">Maison Mie</span>
+          <span className="shop-logo">7s Bakes</span>
           <nav className="shop-nav">
             <button onClick={handleLogout} className="logout-btn">
               Log out
@@ -170,18 +170,17 @@ export default function Shop() {
       {/* ---------- HERO ---------- */}
       <section className="hero">
         <div className="hero-text">
-          <p className="hero-eyebrow">Baked daily, from 6am</p>
+          <p className="hero-eyebrow">Handmade with love, baked fresh daily</p>
           <h1 className="hero-title">
-            Bread, cake,
+            Every Celebration,
             <br />
-            and the wait worth having.
+            Starts With Something Sweet
           </h1>
           <p className="hero-sub">
-            Small-batch pastries made with butter, time, and very little
-            else. Order ahead, pick up warm.
+          Order Now and Get 10% Off on Your First Purchase!
           </p>
           <a href="#shop" className="hero-cta">
-            See today's case
+            Order now
           </a>
         </div>
       </section>
