@@ -119,32 +119,24 @@ export default function Shop() {
     }
   }, [user]);
 
+  // Fetch the current product list from the backend. This is the single
+  // source of truth — no localStorage cache, no polling. The backend's
+  // products.json file is what's authoritative, so we just ask it fresh
+  // whenever we need to know the current state.
   const loadProductsFromServer = () => {
     fetch(`http://localhost:5000/api/products?cb=${Date.now()}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch products");
         return res.json();
       })
-      .then((data) => {
-        setProductsList(data);
-        localStorage.setItem("productsCache", JSON.stringify(data));
-      })
+      .then((data) => setProductsList(data))
       .catch((err) => {
-        console.warn("Using local fallback products:", err);
+        console.warn("Could not load products from server:", err.message);
       });
   };
 
   // Fetch products from backend on mount
   useEffect(() => {
-    const cachedProducts = localStorage.getItem("productsCache");
-    if (cachedProducts) {
-      try {
-        setProductsList(JSON.parse(cachedProducts));
-      } catch (e) {
-        console.error("Failed to parse cached products:", e);
-      }
-    }
-
     loadProductsFromServer();
 
     const savedUser = localStorage.getItem("user");
@@ -182,33 +174,14 @@ export default function Shop() {
     }
   }, []);
 
+  // Refetch products whenever the user comes back to this tab — covers
+  // the common case of "admin edited it in another tab, now check here."
+  // No polling interval, no custom events, no storage listeners — those
+  // were all trying to work around products.json not existing; now that
+  // the backend actually persists data, a simple refetch-on-focus is enough.
   useEffect(() => {
-    const handleProductsUpdated = () => {
-      loadProductsFromServer();
-    };
-
-    const handleStorageUpdated = (event) => {
-      if ((event.key === "productsCache" || event.key === "products-last-updated") && event.newValue) {
-        loadProductsFromServer();
-      }
-    };
-
-    const refreshOnFocus = () => loadProductsFromServer();
-
-    window.addEventListener("products-updated", handleProductsUpdated);
-    window.addEventListener("storage", handleStorageUpdated);
-    window.addEventListener("focus", refreshOnFocus);
-
-    const intervalId = window.setInterval(() => {
-      loadProductsFromServer();
-    }, 2000);
-
-    return () => {
-      window.removeEventListener("products-updated", handleProductsUpdated);
-      window.removeEventListener("storage", handleStorageUpdated);
-      window.removeEventListener("focus", refreshOnFocus);
-      window.clearInterval(intervalId);
-    };
+    window.addEventListener("focus", loadProductsFromServer);
+    return () => window.removeEventListener("focus", loadProductsFromServer);
   }, []);
 
   const filteredProducts = useMemo(() => {
@@ -240,10 +213,50 @@ export default function Shop() {
     );
   };
 
-  const handlePlaceOrder = () => {
-    if (!orderForm.name || !orderForm.phone || !orderForm.address) return;
-    setCheckoutStep("success");
-    setCart([]); // Clear cart
+  const handlePlaceOrder = async () => {
+    if (!orderForm.name || !orderForm.phone || !orderForm.address || cartItems.length === 0) return;
+
+    const orderPayload = {
+      customerName: orderForm.name,
+      phone: orderForm.phone,
+      address: orderForm.address,
+      items: cartItems.map(({ id, qty, product }) => ({
+        id,
+        name: product.name,
+        qty,
+        price: product.price,
+        subtotal: product.price * qty,
+      })),
+      total: totalPrice,
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      const res = await fetch("http://localhost:5000/api/orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(orderPayload),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.message || "Failed to place order.");
+      }
+
+      setCheckoutStep("success");
+      setCart([]);
+      setOrderForm({
+        name: user?.name || "",
+        phone: "",
+        address: "",
+      });
+      window.localStorage.setItem("orders-last-updated", Date.now().toString());
+      window.dispatchEvent(new Event("orders-updated"));
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const cartItems = useMemo(() => {

@@ -2,11 +2,13 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ limit: "10mb", extended: true }));
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ limit: "20mb", extended: true }));
 
 app.use((req, res, next) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
@@ -15,31 +17,27 @@ app.use((req, res, next) => {
 
 const JWT_SECRET = "replace_this_with_a_real_secret_in_env_file";
 
-// --- Fake "database" for demo purposes (use real DB like MongoDB/Postgres in production) ---
-const users = [
-  {
-    id: 1,
-    name: "Jeet Kumar",
-    email: "jeet@example.com",
-    // bcrypt hash of "password123" - verified working hash
-    passwordHash: "$2b$10$NKmqwkiBSTP6VdN8nNvbnuNUsix6D.7fUCB6DPnQXJbniI5fDgvnW",
-    role: "admin",
-    bio: "Chief Pastry Chef & Bakery Administrator.",
-    avatar: "https://i.pravatar.cc/150?img=12",
-  },
-  {
-    id: 2,
-    name: "Customer John",
-    email: "john@example.com",
-    // bcrypt hash of "password123" - verified working hash
-    passwordHash: "$2b$10$NKmqwkiBSTP6VdN8nNvbnuNUsix6D.7fUCB6DPnQXJbniI5fDgvnW",
-    role: "customer",
-    bio: "Devoted customer and dessert lover.",
-    avatar: "https://i.pravatar.cc/150?img=33",
-  },
-];
+// =====================================================================
+// PERSISTENT PRODUCT STORAGE
+// ---------------------------------------------------------------------
+// Previously, `products` was just a JS array living in memory. That
+// meant every time the server restarted (which happens constantly
+// during development), all admin edits — including image changes —
+// were silently wiped and replaced with the original seed data.
+//
+// This is the actual bug behind "image doesn't change for admin or
+// customer": it WAS changing, but only until the next restart, which
+// made it look random and unreliable.
+//
+// Fix: store products in a JSON file on disk (products.json). Every
+// write (create/update/delete) saves to this file. On startup, we
+// load from the file if it exists, otherwise we seed it once. From
+// then on, the file IS the database — restarts no longer lose data.
+// =====================================================================
 
-let products = [
+const DATA_FILE = path.join(__dirname, "products.json");
+
+const SEED_PRODUCTS = [
   {
     id: 1,
     name: "Honey Lavender Loaf",
@@ -132,36 +130,98 @@ let products = [
   },
 ];
 
+function loadProducts() {
+  if (fs.existsSync(DATA_FILE)) {
+    try {
+      const raw = fs.readFileSync(DATA_FILE, "utf-8");
+      return JSON.parse(raw);
+    } catch (err) {
+      console.error("Failed to read products.json, falling back to seed data:", err.message);
+      return [...SEED_PRODUCTS];
+    }
+  }
+  // First run ever: create the file from seed data
+  fs.writeFileSync(DATA_FILE, JSON.stringify(SEED_PRODUCTS, null, 2));
+  return [...SEED_PRODUCTS];
+}
+
+function saveProducts(productsArray) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(productsArray, null, 2));
+}
+
+let products = loadProducts();
+
+const ORDERS_FILE = path.join(__dirname, "orders.json");
+
+function loadOrders() {
+  if (fs.existsSync(ORDERS_FILE)) {
+    try {
+      const raw = fs.readFileSync(ORDERS_FILE, "utf-8");
+      return JSON.parse(raw);
+    } catch (err) {
+      console.error("Failed to read orders.json, falling back to empty order list:", err.message);
+      return [];
+    }
+  }
+
+  fs.writeFileSync(ORDERS_FILE, JSON.stringify([], null, 2));
+  return [];
+}
+
+function saveOrders(ordersArray) {
+  fs.writeFileSync(ORDERS_FILE, JSON.stringify(ordersArray, null, 2));
+}
+
+let orders = loadOrders();
+
+// --- Fake "database" for demo purposes (use real DB like MongoDB/Postgres in production) ---
+const users = [
+  {
+    id: 1,
+    name: "Jeet Kumar",
+    email: "jeet@example.com",
+    // bcrypt hash of "password123" - verified working hash
+    passwordHash: "$2b$10$NKmqwkiBSTP6VdN8nNvbnuNUsix6D.7fUCB6DPnQXJbniI5fDgvnW",
+    role: "admin",
+    bio: "Chief Pastry Chef & Bakery Administrator.",
+    avatar: "https://i.pravatar.cc/150?img=12",
+  },
+  {
+    id: 2,
+    name: "Customer John",
+    email: "john@example.com",
+    // bcrypt hash of "password123" - verified working hash
+    passwordHash: "$2b$10$NKmqwkiBSTP6VdN8nNvbnuNUsix6D.7fUCB6DPnQXJbniI5fDgvnW",
+    role: "customer",
+    bio: "Devoted customer and dessert lover.",
+    avatar: "https://i.pravatar.cc/150?img=33",
+  },
+];
+
 // ---------- ROUTE 1: LOGIN ----------
 app.post("/api/login", async (req, res) => {
   const { email, password } = req.body;
 
-  console.log("Login attempt - Email:", email, "Password:", password);
+  console.log("Login attempt - Email:", email);
 
-  // 1. Find user by email
   const user = users.find((u) => u.email === email);
   if (!user) {
-    console.log("User not found with email:", email);
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
-  // 2. Compare password with stored hash
   const isMatch = await bcrypt.compare(password, user.passwordHash);
   if (!isMatch) {
-    console.log("Password did not match for:", email);
     return res.status(401).json({ message: "Invalid email or password" });
   }
 
   console.log("Login successful for:", email);
 
-  // 3. Create JWT token (including user role)
   const token = jwt.sign(
     { userId: user.id, email: user.email, role: user.role },
     JWT_SECRET,
     { expiresIn: "7d" }
   );
 
-  // 4. Send token + basic user info back to React
   res.json({
     token,
     user: { id: user.id, name: user.name, email: user.email, role: user.role },
@@ -170,7 +230,7 @@ app.post("/api/login", async (req, res) => {
 
 // ---------- MIDDLEWARE: VERIFY TOKEN & ADMIN ----------
 function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization; // "Bearer <token>"
+  const authHeader = req.headers.authorization;
   if (!authHeader) {
     return res.status(401).json({ message: "No token provided" });
   }
@@ -179,9 +239,9 @@ function authMiddleware(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.userId; // attach userId to request for next handler
-    req.userRole = decoded.role; // attach role
-    next(); // token valid, proceed to the actual route
+    req.userId = decoded.userId;
+    req.userRole = decoded.role;
+    next();
   } catch (err) {
     return res.status(401).json({ message: "Invalid or expired token" });
   }
@@ -207,7 +267,7 @@ app.get("/api/profile", authMiddleware, (req, res) => {
     email: user.email,
     bio: user.bio,
     avatar: user.avatar,
-    role: user.role
+    role: user.role,
   });
 });
 
@@ -236,10 +296,11 @@ app.post("/api/products", authMiddleware, adminMiddleware, (req, res) => {
   };
 
   products.push(newProduct);
+  saveProducts(products); // <-- persist to disk immediately
   res.status(201).json(newProduct);
 });
 
-// 3. UPDATE PRODUCT (Admin only)
+// 3. UPDATE PRODUCT (Admin only) — this is the route that handles image changes
 app.put("/api/products/:id", authMiddleware, adminMiddleware, (req, res) => {
   const id = Number(req.params.id);
   const { name, category, price, blurb, img, tag } = req.body;
@@ -261,6 +322,7 @@ app.put("/api/products/:id", authMiddleware, adminMiddleware, (req, res) => {
   };
 
   products[productIdx] = updatedProduct;
+  saveProducts(products); // <-- persist to disk immediately, survives restarts now
   res.json(updatedProduct);
 });
 
@@ -275,7 +337,47 @@ app.delete("/api/products/:id", authMiddleware, adminMiddleware, (req, res) => {
 
   const deletedProduct = products[productIdx];
   products.splice(productIdx, 1);
+  saveProducts(products); // <-- persist to disk immediately
   res.json({ message: "Product deleted successfully.", product: deletedProduct });
+});
+
+// ---------- ROUTES: ORDER MANAGEMENT ----------
+
+// 1. GET ALL ORDERS (Admin only)
+app.get("/api/orders", authMiddleware, adminMiddleware, (req, res) => {
+  const sortedOrders = [...orders].sort(
+    (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+  );
+  res.json(sortedOrders);
+});
+
+// 2. SUBMIT NEW ORDER (Customers)
+app.post("/api/orders", (req, res) => {
+  const { customerName, phone, address, items, total, createdAt } = req.body;
+
+  if (!customerName || !phone || !address) {
+    return res.status(400).json({ message: "Customer name, phone, and address are required." });
+  }
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: "At least one cart item is required." });
+  }
+
+  const newOrder = {
+    id: orders.length > 0 ? Math.max(...orders.map((order) => order.id)) + 1 : 1,
+    customerName,
+    phone,
+    address,
+    items,
+    total: Number(total) || 0,
+    status: "pending",
+    createdAt: createdAt || new Date().toISOString(),
+  };
+
+  orders.push(newOrder);
+  saveOrders(orders);
+
+  res.status(201).json(newOrder);
 });
 
 app.listen(5000, () => console.log("Server running on port 5000"));

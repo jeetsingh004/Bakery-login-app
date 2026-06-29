@@ -23,6 +23,10 @@ export default function AdminInventory() {
     img: "",
     tag: "",
   });
+  const [currentImage, setCurrentImage] = useState("");
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [ordersError, setOrdersError] = useState(null);
 
   // Delete Confirmation states
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -36,6 +40,9 @@ export default function AdminInventory() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  // Fetch the current product list from the backend. This is the single
+  // source of truth — no localStorage cache. The backend's products.json
+  // file is authoritative, so a fresh fetch always reflects reality.
   const syncProductsFromServer = () => {
     setLoading(true);
     return fetch(`http://localhost:5000/api/products?cb=${Date.now()}`)
@@ -45,8 +52,6 @@ export default function AdminInventory() {
       })
       .then((data) => {
         setProducts(data);
-        localStorage.setItem("productsCache", JSON.stringify(data));
-        localStorage.setItem("products-last-updated", Date.now().toString());
         return data;
       })
       .catch((err) => {
@@ -100,6 +105,7 @@ export default function AdminInventory() {
         localStorage.setItem("user", JSON.stringify(profile));
         setAuthorized(true);
         syncProductsFromServer();
+        syncOrdersFromServer();
       } catch (e) {
         if (!isMounted) return;
         showToast("Session error.", "error");
@@ -114,33 +120,37 @@ export default function AdminInventory() {
     };
   }, [navigate]);
 
+  const syncOrdersFromServer = async () => {
+    setOrdersLoading(true);
+    const token = localStorage.getItem("token");
+
+    try {
+      const res = await fetch("http://localhost:5000/api/orders", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Could not load orders.");
+      }
+
+      const data = await res.json();
+      setOrders(data);
+      setOrdersError(null);
+      return data;
+    } catch (err) {
+      setOrdersError(err.message);
+      showToast(err.message, "error");
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   const fetchProducts = () => {
     return syncProductsFromServer();
   };
-
-  useEffect(() => {
-    const handleProductsUpdated = () => {
-      syncProductsFromServer();
-    };
-
-    const handleStorageUpdated = (event) => {
-      if (event.key === "productsCache" && event.newValue) {
-        try {
-          setProducts(JSON.parse(event.newValue));
-        } catch (e) {
-          console.error("Failed to parse cached products:", e);
-        }
-      }
-    };
-
-    window.addEventListener("products-updated", handleProductsUpdated);
-    window.addEventListener("storage", handleStorageUpdated);
-
-    return () => {
-      window.removeEventListener("products-updated", handleProductsUpdated);
-      window.removeEventListener("storage", handleStorageUpdated);
-    };
-  }, []);
 
   // Form submission: Create or Update
   const handleFormSubmit = async (e) => {
@@ -192,10 +202,6 @@ export default function AdminInventory() {
       );
       setModalOpen(false);
       await fetchProducts();
-      window.dispatchEvent(new CustomEvent("products-updated", {
-        detail: { source: "admin", timestamp: Date.now() },
-      }));
-      window.localStorage.setItem("products-last-updated", Date.now().toString());
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -204,12 +210,13 @@ export default function AdminInventory() {
   // Open modal for editing
   const handleEditClick = (product) => {
     setEditingProduct(product);
+    setCurrentImage(product.img || "");
     setFormData({
       name: product.name,
       category: product.category,
       price: product.price.toString(),
       blurb: product.blurb || "",
-      img: product.img || "",
+      img: "",
       tag: product.tag || "",
     });
     setModalOpen(true);
@@ -218,6 +225,7 @@ export default function AdminInventory() {
   // Open modal for adding
   const handleAddClick = () => {
     setEditingProduct(null);
+    setCurrentImage("");
     setFormData({
       name: "",
       category: "Cakes",
@@ -234,6 +242,26 @@ export default function AdminInventory() {
     setProductToDelete(product);
     setDeleteConfirmOpen(true);
   };
+
+  useEffect(() => {
+    const handleOrdersUpdated = () => {
+      syncOrdersFromServer();
+    };
+
+    const handleStorageUpdated = (event) => {
+      if (event.key === "orders-last-updated" && event.newValue) {
+        syncOrdersFromServer();
+      }
+    };
+
+    window.addEventListener("orders-updated", handleOrdersUpdated);
+    window.addEventListener("storage", handleStorageUpdated);
+
+    return () => {
+      window.removeEventListener("orders-updated", handleOrdersUpdated);
+      window.removeEventListener("storage", handleStorageUpdated);
+    };
+  }, []);
 
   // Perform delete operation
   const confirmDelete = async () => {
@@ -258,10 +286,6 @@ export default function AdminInventory() {
       setDeleteConfirmOpen(false);
       setProductToDelete(null);
       await fetchProducts();
-      window.dispatchEvent(new CustomEvent("products-updated", {
-        detail: { source: "admin", timestamp: Date.now() },
-      }));
-      window.localStorage.setItem("products-last-updated", Date.now().toString());
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -277,6 +301,7 @@ export default function AdminInventory() {
       const reader = new FileReader();
       reader.onloadend = () => {
         setFormData((prev) => ({ ...prev, img: reader.result }));
+        setCurrentImage(reader.result);
       };
       reader.readAsDataURL(file);
     }
@@ -504,6 +529,64 @@ export default function AdminInventory() {
             </div>
           )}
         </div>
+
+        {/* ---------- ORDERS PANEL ---------- */}
+        <section className="orders-card">
+          <div className="orders-card-header">
+            <div>
+              <h2>Recent Customer Orders</h2>
+              <p className="orders-subtitle">Orders placed by customers appear here for admin review.</p>
+            </div>
+            <button className="refresh-orders-btn" onClick={syncOrdersFromServer}>
+              Refresh Orders
+            </button>
+          </div>
+
+          {ordersLoading ? (
+            <div className="orders-loading">
+              <div className="spinner"></div>
+              <p>Loading orders...</p>
+            </div>
+          ) : ordersError ? (
+            <div className="orders-error">{ordersError}</div>
+          ) : orders.length === 0 ? (
+            <div className="orders-empty">
+              <p>No orders have been placed yet.</p>
+              <span>Customers will see their orders here once they check out.</span>
+            </div>
+          ) : (
+            <div className="orders-list">
+              {orders.slice(0, 8).map((order) => (
+                <div className="order-card" key={order.id}>
+                  <div className="order-card-top">
+                    <div>
+                      <span className="order-label">Order #{order.id}</span>
+                      <span className="order-date">{new Date(order.createdAt).toLocaleString()}</span>
+                    </div>
+                    <span className="order-status">{order.status}</span>
+                  </div>
+                  <div className="order-customer">
+                    <strong>{order.customerName}</strong>
+                    <span>{order.phone}</span>
+                  </div>
+                  <div className="order-address">{order.address}</div>
+                  <div className="order-items">
+                    {order.items.map((item) => (
+                      <div className="order-item" key={`${order.id}-${item.id}`}>
+                        <span>{item.qty}× {item.name}</span>
+                        <strong>₹{item.subtotal.toFixed(2)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="order-total">
+                    <span>Total</span>
+                    <strong>₹{order.total.toFixed(2)}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </main>
 
       {/* ---------- FORM MODAL (ADD / EDIT) ---------- */}
@@ -601,11 +684,11 @@ export default function AdminInventory() {
                 ></textarea>
               </div>
 
-              {formData.img && (
+              {(formData.img || currentImage) && (
                 <div className="image-preview-box">
                   <p>Image Preview</p>
                   <img
-                    src={formData.img}
+                    src={formData.img || currentImage}
                     alt="Preview"
                     onError={(e) => {
                       e.target.src = "https://images.unsplash.com/photo-1509440159596-0249088772ff?w=300&q=80";
