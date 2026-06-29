@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import "./Shop.css";
 
@@ -60,20 +60,38 @@ const PRODUCTS = [
   },
   {
     id: 7,
-    name: "Dark Chocolate Babka",
+    name: "Vanilla Bean Cupcakes",
     category: "Cakes",
-    price: 22,
-    blurb: "Braided yeasted dough, bittersweet chocolate ribbon.",
-    img: "https://images.unsplash.com/photo-1606890658317-7d14490b76fd?w=600&q=80",
-    tag: null,
+    price: 12,
+    blurb: "Soft vanilla sponge with whipped buttercream and a sugared swirl.",
+    img: "https://images.unsplash.com/photo-1483695028939-5bb13f8648b0?w=600&q=80",
+    tag: "New",
   },
   {
     id: 8,
-    name: "Lemon Curd Tartlets",
+    name: "Chocolate Espresso Cupcakes",
+    category: "Cakes",
+    price: 13,
+    blurb: "Dark chocolate cake with espresso cream and cocoa nib crunch.",
+    img: "https://images.unsplash.com/photo-1499636136210-6f4ee915583e?w=600&q=80",
+    tag: "Bestseller",
+  },
+  {
+    id: 9,
+    name: "Almond Raspberry Tart",
     category: "Tarts",
-    price: 8,
-    blurb: "Buttery shell, tangy curd, torched meringue peak.",
-    img: "https://images.unsplash.com/photo-1551404973-761c83cd8335?w=600&q=80",
+    price: 10,
+    blurb: "Buttery crust, almond cream, and bright raspberry compote.",
+    img: "https://images.unsplash.com/photo-1519869325930-281384150729?w=600&q=80",
+    tag: null,
+  },
+  {
+    id: 10,
+    name: "Honey Pistachio Biscotti",
+    category: "Cookies",
+    price: 7,
+    blurb: "Crunchy biscotti with honey glaze and toasted pistachios.",
+    img: "https://images.unsplash.com/photo-1607919565149-65b33f167c43?w=600&q=80",
     tag: null,
   },
 ];
@@ -81,16 +99,122 @@ const PRODUCTS = [
 const CATEGORIES = ["All", "Cakes", "Tarts", "Pastries", "Cookies"];
 
 export default function Shop() {
+  const [productsList, setProductsList] = useState(PRODUCTS);
   const [activeCategory, setActiveCategory] = useState("All");
   const [cart, setCart] = useState([]); // [{id, qty}]
   const [cartOpen, setCartOpen] = useState(false);
   const [justAdded, setJustAdded] = useState(null);
+  const [user, setUser] = useState(null);
+  const [checkoutStep, setCheckoutStep] = useState("cart"); // "cart" | "checkout" | "success"
+  const [orderForm, setOrderForm] = useState({
+    name: "",
+    phone: "",
+    address: ""
+  });
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (user) {
+      setOrderForm((prev) => ({ ...prev, name: user.name }));
+    }
+  }, [user]);
+
+  const loadProductsFromServer = () => {
+    fetch(`http://localhost:5000/api/products?cb=${Date.now()}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch products");
+        return res.json();
+      })
+      .then((data) => {
+        setProductsList(data);
+        localStorage.setItem("productsCache", JSON.stringify(data));
+      })
+      .catch((err) => {
+        console.warn("Using local fallback products:", err);
+      });
+  };
+
+  // Fetch products from backend on mount
+  useEffect(() => {
+    const cachedProducts = localStorage.getItem("productsCache");
+    if (cachedProducts) {
+      try {
+        setProductsList(JSON.parse(cachedProducts));
+      } catch (e) {
+        console.error("Failed to parse cached products:", e);
+      }
+    }
+
+    loadProductsFromServer();
+
+    const savedUser = localStorage.getItem("user");
+    const token = localStorage.getItem("token");
+
+    if (token) {
+      fetch("http://localhost:5000/api/profile", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Profile fetch failed");
+          return res.json();
+        })
+        .then((profile) => {
+          setUser(profile);
+          localStorage.setItem("user", JSON.stringify(profile));
+        })
+        .catch(() => {
+          if (savedUser) {
+            try {
+              setUser(JSON.parse(savedUser));
+            } catch (e) {
+              console.error("Failed to parse user details:", e);
+            }
+          }
+        });
+    } else if (savedUser) {
+      try {
+        setUser(JSON.parse(savedUser));
+      } catch (e) {
+        console.error("Failed to parse user details:", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleProductsUpdated = () => {
+      loadProductsFromServer();
+    };
+
+    const handleStorageUpdated = (event) => {
+      if ((event.key === "productsCache" || event.key === "products-last-updated") && event.newValue) {
+        loadProductsFromServer();
+      }
+    };
+
+    const refreshOnFocus = () => loadProductsFromServer();
+
+    window.addEventListener("products-updated", handleProductsUpdated);
+    window.addEventListener("storage", handleStorageUpdated);
+    window.addEventListener("focus", refreshOnFocus);
+
+    const intervalId = window.setInterval(() => {
+      loadProductsFromServer();
+    }, 2000);
+
+    return () => {
+      window.removeEventListener("products-updated", handleProductsUpdated);
+      window.removeEventListener("storage", handleStorageUpdated);
+      window.removeEventListener("focus", refreshOnFocus);
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   const filteredProducts = useMemo(() => {
-    if (activeCategory === "All") return PRODUCTS;
-    return PRODUCTS.filter((p) => p.category === activeCategory);
-  }, [activeCategory]);
+    if (activeCategory === "All") return productsList;
+    return productsList.filter((p) => p.category === activeCategory);
+  }, [activeCategory, productsList]);
 
   const addToCart = (id) => {
     setCart((prev) => {
@@ -116,20 +240,35 @@ export default function Shop() {
     );
   };
 
-  const cartItems = cart.map((item) => ({
-    ...item,
-    product: PRODUCTS.find((p) => p.id === item.id),
-  }));
+  const handlePlaceOrder = () => {
+    if (!orderForm.name || !orderForm.phone || !orderForm.address) return;
+    setCheckoutStep("success");
+    setCart([]); // Clear cart
+  };
+
+  const cartItems = useMemo(() => {
+    return cart
+      .map((item) => {
+        const foundProduct = productsList.find((p) => p.id === item.id);
+        if (!foundProduct) return null;
+        return {
+          ...item,
+          product: foundProduct,
+        };
+      })
+      .filter(Boolean);
+  }, [cart, productsList]);
 
   const totalItems = cart.reduce((sum, item) => sum + item.qty, 0);
-  const totalPrice = cartItems.reduce(
-    (sum, item) => sum + item.product.price * item.qty,
-    0
-  );
+  
+  const totalPrice = useMemo(() => {
+    return cartItems.reduce((sum, item) => sum + item.product.price * item.qty, 0);
+  }, [cartItems]);
 
   const handleLogout = () => {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    setUser(null);
     navigate("/login");
   };
 
@@ -138,11 +277,30 @@ export default function Shop() {
       {/* ---------- HEADER ---------- */}
       <header className="shop-header">
         <div className="shop-header-inner">
-          <span className="shop-logo">7s Bakes</span>
+          <span className="shop-logo" onClick={() => navigate("/shop")} style={{ cursor: "pointer" }}>7s Bakes</span>
           <nav className="shop-nav">
-            <button onClick={handleLogout} className="logout-btn">
-              Log out
-            </button>
+            {user ? (
+              <>
+                <span className="user-welcome" style={{ color: "var(--caramel-light)", fontSize: "14px", marginRight: "10px" }}>
+                  Hello, <strong>{user.name.split(" ")[0]}</strong>
+                </span>
+                {user.role === "admin" && (
+                  <button onClick={() => navigate("/admin/inventory")} className="logout-btn" style={{ borderColor: "var(--cinnamon)", color: "var(--caramel-light)", backgroundColor: "rgba(184, 84, 31, 0.15)" }}>
+                    Admin Panel
+                  </button>
+                )}
+                <button onClick={() => navigate("/profile")} className="logout-btn">
+                  Profile
+                </button>
+                <button onClick={handleLogout} className="logout-btn">
+                  Log out
+                </button>
+              </>
+            ) : (
+              <button onClick={() => navigate("/login")} className="logout-btn">
+                Log in
+              </button>
+            )}
             <button
               className="cart-trigger"
               onClick={() => setCartOpen(true)}
@@ -225,7 +383,7 @@ export default function Shop() {
               <div className="product-info">
                 <div className="product-head">
                   <h3>{product.name}</h3>
-                  <span className="product-price">${product.price}</span>
+                  <span className="product-price">₹{product.price}</span>
                 </div>
                 <p className="product-blurb">{product.blurb}</p>
                 <button
@@ -266,43 +424,141 @@ export default function Shop() {
           </button>
         </div>
 
-        {cartItems.length === 0 ? (
-          <div className="cart-empty">
-            <p>Your box is empty.</p>
-            <span>Add something warm from the case.</span>
-          </div>
-        ) : (
-          <>
-            <ul className="cart-list">
-              {cartItems.map(({ id, qty, product }) => (
-                <li className="cart-item" key={id}>
-                  <img src={product.img} alt={product.name} />
-                  <div className="cart-item-info">
-                    <span className="cart-item-name">{product.name}</span>
-                    <span className="cart-item-price">
-                      ${product.price} each
-                    </span>
-                  </div>
-                  <div className="cart-qty">
-                    <button onClick={() => updateQty(id, -1)} aria-label="Decrease quantity">
-                      −
-                    </button>
-                    <span>{qty}</span>
-                    <button onClick={() => updateQty(id, 1)} aria-label="Increase quantity">
-                      +
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-            <div className="cart-footer">
-              <div className="cart-total">
-                <span>Total</span>
-                <span>${totalPrice.toFixed(2)}</span>
-              </div>
-              <button className="checkout-btn">Checkout</button>
+        {checkoutStep === "cart" && (
+          cartItems.length === 0 ? (
+            <div className="cart-empty">
+              <p>Your box is empty.</p>
+              <span>Add something warm from the case.</span>
             </div>
-          </>
+          ) : (
+            <>
+              <ul className="cart-list">
+                {cartItems.map(({ id, qty, product }) => (
+                  <li className="cart-item" key={id}>
+                    <img src={product.img} alt={product.name} />
+                    <div className="cart-item-info">
+                      <span className="cart-item-name">{product.name}</span>
+                      <span className="cart-item-price">
+                        ₹{product.price} each
+                      </span>
+                    </div>
+                    <div className="cart-qty">
+                      <button onClick={() => updateQty(id, -1)} aria-label="Decrease quantity">
+                        −
+                      </button>
+                      <span>{qty}</span>
+                      <button onClick={() => updateQty(id, 1)} aria-label="Increase quantity">
+                        +
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <div className="cart-footer">
+                <div className="cart-total">
+                  <span>Total</span>
+                  <span>₹{totalPrice.toFixed(2)}</span>
+                </div>
+                <button className="checkout-btn" onClick={() => setCheckoutStep("checkout")}>
+                  Checkout
+                </button>
+              </div>
+            </>
+          )
+        )}
+
+        {checkoutStep === "checkout" && (
+          <div className="cart-checkout-form" style={{ padding: "24px", overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "16px" }}>
+            <h3 style={{ fontFamily: "Fraunces, serif", fontSize: "20px", color: "var(--chocolate)", margin: "0 0 8px" }}>Delivery Details</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.03em" }}>Your Name *</label>
+              <input
+                type="text"
+                value={orderForm.name}
+                onChange={(e) => setOrderForm(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="Full Name"
+                required
+                style={{ padding: "10px", borderRadius: "10px", border: "1px solid var(--line)", outline: "none", fontSize: "14px" }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.03em" }}>Phone Number *</label>
+              <input
+                type="tel"
+                value={orderForm.phone}
+                onChange={(e) => setOrderForm(prev => ({ ...prev, phone: e.target.value }))}
+                placeholder="e.g., +91 98765 43210"
+                required
+                style={{ padding: "10px", borderRadius: "10px", border: "1px solid var(--line)", outline: "none", fontSize: "14px" }}
+              />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ fontSize: "12px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.03em" }}>Delivery Location / Address *</label>
+              <textarea
+                value={orderForm.address}
+                onChange={(e) => setOrderForm(prev => ({ ...prev, address: e.target.value }))}
+                placeholder="Enter complete building address, street name, pincode"
+                rows="4"
+                required
+                style={{ padding: "10px", borderRadius: "10px", border: "1px solid var(--line)", outline: "none", fontSize: "14px", fontFamily: "inherit", resize: "none" }}
+              />
+            </div>
+
+            <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "10px", paddingTop: "20px", borderTop: "1px solid var(--line)" }}>
+              <div className="cart-total" style={{ margin: "0 0 10px", display: "flex", justifyContent: "space-between", alignItems: "baseline", fontFamily: "Fraunces, serif" }}>
+                <span style={{ fontSize: "15px", fontFamily: "Inter, sans-serif", color: "rgba(61, 43, 31, 0.7)" }}>Grand Total</span>
+                <span style={{ fontSize: "24px", color: "var(--cocoa)", fontWeight: "500" }}>₹{totalPrice.toFixed(2)}</span>
+              </div>
+              <button
+                onClick={handlePlaceOrder}
+                className="checkout-btn"
+                disabled={!orderForm.name || !orderForm.phone || !orderForm.address}
+                style={{ opacity: (!orderForm.name || !orderForm.phone || !orderForm.address) ? 0.6 : 1 }}
+              >
+                Place Order
+              </button>
+              <button
+                onClick={() => setCheckoutStep("cart")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "rgba(61, 43, 31, 0.6)",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: "500",
+                  padding: "8px"
+                }}
+              >
+                ← Back to Cart
+              </button>
+            </div>
+          </div>
+        )}
+
+        {checkoutStep === "success" && (
+          <div className="cart-success" style={{ padding: "40px 24px", textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", flex: 1, gap: "16px" }}>
+            <span style={{ fontSize: "60px" }}>🎉</span>
+            <h3 style={{ fontFamily: "Fraunces, serif", fontSize: "24px", color: "var(--chocolate)", margin: "0" }}>Order Placed!</h3>
+            <p style={{ fontSize: "15px", lineHeight: "1.6", color: "rgba(61, 43, 31, 0.8)", margin: "0 0 10px" }}>
+              Thank you, <strong>{orderForm.name}</strong>! Your freshly baked goodies will be delivered to:
+            </p>
+            <div style={{ backgroundColor: "#ffffff", padding: "12px 18px", borderRadius: "12px", border: "1px dashed var(--line)", fontSize: "14px", color: "var(--cocoa)", width: "100%", wordBreak: "break-word" }}>
+              {orderForm.address}
+            </div>
+            <p style={{ fontSize: "13px", color: "rgba(61, 43, 31, 0.55)", margin: "0" }}>
+              Our delivery partner will contact you at <strong>{orderForm.phone}</strong> when they arrive.
+            </p>
+            <button
+              onClick={() => {
+                setCheckoutStep("cart");
+                setCartOpen(false);
+              }}
+              className="checkout-btn"
+              style={{ marginTop: "24px", width: "100%" }}
+            >
+              Close & Continue Shopping
+            </button>
+          </div>
         )}
       </aside>
     </div>
