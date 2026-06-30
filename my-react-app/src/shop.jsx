@@ -124,7 +124,7 @@ export default function Shop() {
   // products.json file is what's authoritative, so we just ask it fresh
   // whenever we need to know the current state.
   const loadProductsFromServer = () => {
-    fetch(`http://localhost:5000/api/products?cb=${Date.now()}`)
+    fetch(`/api/products?cb=${Date.now()}`)
       .then((res) => {
         if (!res.ok) throw new Error("Failed to fetch products");
         return res.json();
@@ -143,7 +143,7 @@ export default function Shop() {
     const token = localStorage.getItem("token");
 
     if (token) {
-      fetch("http://localhost:5000/api/profile", {
+      fetch("/api/profile", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -232,7 +232,7 @@ export default function Shop() {
     };
 
     try {
-      const res = await fetch("http://localhost:5000/api/orders", {
+      const res = await fetch("/api/orders", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

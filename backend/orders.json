@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "customerName": "Customer John",
+    "phone": "9872314076",
+    "address": "sector17, punjab",
+    "items": [
+      {
+        "id": 4,
+        "name": "Pistachio Rose Cake",
+        "qty": 1,
+        "price": 749,
+        "subtotal": 749
+      },
+      {
+        "id": 7,
+        "name": "Vanilla Bean Cupcakes",
+        "qty": 2,
+        "price": 60,
+        "subtotal": 120
+      }
+    ],
+    "total": 869,
+    "status": "pending",
+    "createdAt": "2026-06-30T02:58:08.637Z"
+  }
+]

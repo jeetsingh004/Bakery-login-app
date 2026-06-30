@@ -45,7 +45,7 @@ export default function AdminInventory() {
   // file is authoritative, so a fresh fetch always reflects reality.
   const syncProductsFromServer = () => {
     setLoading(true);
-    return fetch(`http://localhost:5000/api/products?cb=${Date.now()}`)
+    return fetch(`/api/products?cb=${Date.now()}`)
       .then((res) => {
         if (!res.ok) throw new Error("Could not load products.");
         return res.json();
@@ -77,7 +77,7 @@ export default function AdminInventory() {
       }
 
       try {
-        const res = await fetch("http://localhost:5000/api/profile", {
+        const res = await fetch("/api/profile", {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -125,7 +125,7 @@ export default function AdminInventory() {
     const token = localStorage.getItem("token");
 
     try {
-      const res = await fetch("http://localhost:5000/api/orders", {
+      const res = await fetch("/api/orders", {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -175,8 +175,8 @@ export default function AdminInventory() {
     }
 
     const url = editingProduct
-      ? `http://localhost:5000/api/products/${editingProduct.id}`
-      : "http://localhost:5000/api/products";
+      ? `/api/products/${editingProduct.id}`
+      : "/api/products";
     const method = editingProduct ? "PUT" : "POST";
 
     try {
@@ -269,7 +269,7 @@ export default function AdminInventory() {
     const token = localStorage.getItem("token");
 
     try {
-      const res = await fetch(`http://localhost:5000/api/products/${productToDelete.id}`, {
+      const res = await fetch(`/api/products/${productToDelete.id}`, {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,
